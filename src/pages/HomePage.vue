@@ -1,192 +1,239 @@
 <script setup lang="ts">
+import { ref, computed, onMounted, watch } from 'vue'
 import { fetchTasks } from '@/services/api'
-import { ref, onMounted, watch } from 'vue'
+import TaskList from '@/component/TaskList.vue'
 
 interface Task {
-title?: string;
-name?: string;
-task?: string;
-completed: boolean;
-description?: string;
-id: number;
+  id: number
+  completed: boolean
+  title?: string
+  name?: string
+  task?: string
+  description?: string
 }
 
-// tasks state
-const allTasks = ref<Task[]>([])
-const filteredTasks = ref<Task[]>([])
+// state
+const tasks = ref<Task[]>([])
+const loading = ref(false)
+const error = ref('')
 
-// loading state
-const loading = ref(true)
-const error = ref<string | null>(null)
+const search = ref('')
+const filter = ref<'all' | 'completed' | 'incomplete'>('all')
 
-//pagination this.state
 const currentPage = ref(1)
-const totalPages = ref(1)
 const itemsPerPage = 10
-const displayTasks = ref<Task[]>([])
 
+// fetch tasks
+const loadTasks = async () => {
+  loading.value = true
+  error.value = ''
 
-// filter state
-const searchTerm = ref<string>('')
-const filterStatus = ref<string | null>('all')
-
-const loadAllTasks = async () => {
   try {
-    loading.value = true
-    error.value = null
-
     const data = await fetchTasks(1, 1000)
-    const tasks = data.tasks || []
-
-    allTasks.value = tasks
-    filteredTasks.value = tasks
-  } catch (err: unknown) {
-    if (err instanceof Error) {
-      error.value = err.message
-    } else {
-      error.value = "Failed to load tasks"
-    }
+    tasks.value = data.tasks ?? []
+  } catch (err) {
+    error.value =
+      err instanceof Error
+        ? err.message
+        : 'Failed to fetch tasks'
   } finally {
     loading.value = false
   }
 }
 
-onMounted(() => {
-  loadAllTasks()
+onMounted(loadTasks)
+
+// helpers
+const getTaskTitle = (task: Task) =>
+  task.title || task.name || task.task || 'Untitled Task'
+
+// filtering
+const filteredTasks = computed(() => {
+  return tasks.value.filter(task => {
+    const matchesSearch = getTaskTitle(task)
+      .toLowerCase()
+      .includes(search.value.toLowerCase())
+
+    const matchesFilter =
+      filter.value === 'all'
+        ? true
+        : filter.value === 'completed'
+        ? task.completed
+        : !task.completed
+
+    return matchesSearch && matchesFilter
+  })
 })
 
-watch(
-  [searchTerm, filterStatus, allTasks],
-  () => {
-    let result = [...allTasks.value]
-
-    if (searchTerm.value.trim()) {
-      result = result.filter(task => {
-        const title = task.title || task.name || task.task || ''
-
-        return title
-          .toLowerCase()
-          .includes(searchTerm.value.toLowerCase())
-      })
-    }
-
-
-    if (filterStatus.value === 'completed') {
-      result = result.filter(task => task.completed === true)
-    } else if (filterStatus.value === 'incomplete') {
-      result = result.filter(task => task.completed === false)
-    }
-
-    filteredTasks.value = result
-    currentPage.value = 1
-  },
+// pagination
+const totalPages = computed(() =>
+  Math.ceil(filteredTasks.value.length / itemsPerPage)
 )
 
+const paginatedTasks = computed(() => {
+  const start = (currentPage.value - 1) * itemsPerPage
 
+  return filteredTasks.value.slice(
+    start,
+    start + itemsPerPage
+  )
+})
+
+// stats
+const completedCount = computed(
+  () => tasks.value.filter(t => t.completed).length
+)
+
+const incompleteCount = computed(
+  () => tasks.value.filter(t => !t.completed).length
+)
+
+// reset page when filters change
+watch([search, filter], () => {
+  currentPage.value = 1
+})
+
+// pagination handlers
+const nextPage = () => {
+  if (currentPage.value < totalPages.value) {
+    currentPage.value++
+  }
+}
+
+const prevPage = () => {
+  if (currentPage.value > 1) {
+    currentPage.value--
+  }
+}
 </script>
 
 <template>
- <div className="max-w-7xl mx-auto px-4 py-8">
-      <!-- Header  -->
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold text-gray-800 mb-2">My Tasks</h1>
+  <section class="max-w-6xl mx-auto p-4 space-y-6">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-800">
+          Tasks
+        </h1>
+
+        <p class="text-sm text-gray-500">
+          {{ filteredTasks.length }} task(s)
+        </p>
       </div>
-
-      <!-- Search & Filter Bar -->
-      <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Search Tasks
-          </label>
-          <input
-            type="text"
-            placeholder="Search by title..."
-            value={searchTerm}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-            aria-label='search tasks by title'
-          />
-        </div>
-
-         <!-- Filter Buttons  -->
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Filter by Status
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button>
-
-              All Tasks ({allTasks.length})
-            </button>
-            <button aria-label='show completed tasks only'>
-              Completed ({allTasks.filter(t => t.completed).length})
-            </button>
-            <button aria-label='show incompleted tasks only'
-            >
-              Incomplete ({allTasks.filter(t => !t.completed).length})
-            </button>
-          </div>
-        </div>
-
-        <!-- Clear Filters  -->
-        {(searchTerm || filterStatus !== 'all') && (
-          <button className="mt-4 text-sm text-pink-600 hover:text-pink-800 font-medium"
-          >
-            Clear all filters
-          </button>
-        )}
-      </div>
-
-      <!-- Task List  -->
-      <TaskList/>
-
-      <!-- Pagination  -->
-      {totalPages > 1 && (
-        <div className="flex justify-center items-center gap-4 mt-12">
-          <button>
-            ← Previous
-          </button>
-
-          <span className="px-6 py-3 bg-white rounded-lg shadow-md font-medium">
-            Page {currentPage} of {totalPages}
-          </span>
-
-          <button>
-            Next →
-          </button>
-        </div>
-      )}
     </div>
+
+    <!-- Controls -->
+    <div class="bg-white border rounded-xl p-4 space-y-4">
+
+      <!-- Search -->
+      <input
+        v-model="search"
+        type="text"
+        placeholder="Search tasks..."
+        class="w-full border rounded-lg px-4 py-2 outline-none focus:ring-2 focus:ring-pink-500"
+      />
+
+      <!-- Filters -->
+      <div class="flex flex-wrap gap-2">
+
+        <button
+          @click="filter = 'all'"
+          :class="[
+            'px-3 py-2 rounded-lg border text-sm',
+            filter === 'all'
+              ? 'bg-pink-500 text-white border-pink-500'
+              : 'bg-white'
+          ]"
+        >
+          All ({{ tasks.length }})
+        </button>
+
+        <button
+          @click="filter = 'completed'"
+          :class="[
+            'px-3 py-2 rounded-lg border text-sm',
+            filter === 'completed'
+              ? 'bg-green-500 text-white border-green-500'
+              : 'bg-white'
+          ]"
+        >
+          Completed ({{ completedCount }})
+        </button>
+
+        <button
+          @click="filter = 'incomplete'"
+          :class="[
+            'px-3 py-2 rounded-lg border text-sm',
+            filter === 'incomplete'
+              ? 'bg-yellow-500 text-white border-yellow-500'
+              : 'bg-white'
+          ]"
+        >
+          Pending ({{ incompleteCount }})
+        </button>
+      </div>
+    </div>
+
+    <!-- Loading -->
+    <div
+      v-if="loading"
+      class="text-center py-10 text-gray-500"
+    >
+      Loading tasks...
+    </div>
+
+    <!-- Error -->
+    <div
+      v-else-if="error"
+      class="bg-red-100 text-red-600 p-4 rounded-lg"
+    >
+      {{ error }}
+    </div>
+
+    <!-- Content -->
+    <template v-else>
+
+      <!-- Empty State -->
+      <div
+        v-if="paginatedTasks.length === 0"
+        class="text-center py-10 border rounded-xl text-gray-500"
+      >
+        No tasks found.
+      </div>
+
+      <!-- Task List -->
+      <TaskList
+        v-else
+        :tasks="paginatedTasks"
+      />
+
+      <!-- Pagination -->
+      <div
+        v-if="totalPages > 1"
+        class="flex items-center justify-center gap-4"
+      >
+        <button
+          @click="prevPage"
+          :disabled="currentPage === 1"
+          class="px-4 py-2 border rounded-lg disabled:opacity-50"
+        >
+          Prev
+        </button>
+
+        <span class="text-sm font-medium">
+          {{ currentPage }} / {{ totalPages }}
+        </span>
+
+        <button
+          @click="nextPage"
+          :disabled="currentPage === totalPages"
+          class="px-4 py-2 border rounded-lg disabled:opacity-50"
+        >
+          Next
+        </button>
+      </div>
+
+    </template>
+  </section>
 </template>
-
-<!-- <script setup lang="ts">
-import { ref } from 'vue';
-
-interface Task {
-title?: string;
-name?: string;
-task?: string;
-completed: boolean;
-description?: string;
-id: number;
-}
-
-// task data states
-const allTasks = ref<Task[]>([])
-const filteredTasks = ref<Task[]>([])
-const displayTasks= ref<Task[]>([])
-
-// loading state
-const loading = ref(true)
-const error = ref<string | null>(null)
-
-//pagination this.state
-const currentPage = ref(1)
-const totalPages = ref(1)
-const itemsPerPage = 10
-
-
-// filter state
-const searchTerm = ref<string |null>('')
-const filterStatus = ref<string | null>('all')
-</script>
-``` -->
